@@ -441,6 +441,7 @@ func (adder *Adder) addFile(path string, file files.File) error {
 
 	// yx
 	reader := ipfsKeystoneTest.Ipfs_keystone_test(1, "aestest.txt")
+	fmt.Println("path: ", path)
 	defer reader.Close()
 	//yx 
 

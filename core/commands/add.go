@@ -365,6 +365,7 @@ See 'dag export' and 'dag import' for more information.
 			go func() {
 				var err error
 				defer close(events)
+				fmt.Println("name: ", addit.Name())
 				pathAdded, err := api.Unixfs().Add(req.Context, addit.Node(), opts...)
 				if err != nil {
 					errCh <- err
