@@ -441,20 +441,29 @@ func (adder *Adder) addFile(path string, file files.File) error {
 
 	// yx
 	reader := ipfsKeystoneTest.Ipfs_keystone_test(1, "aestest.txt")
-	fmt.Println("path: ", path)
+	fileSize, err := file.Size()
+	if err != nil {
+		fmt.Printf("Error getting file size: %v\n", err)
+		return err
+	}
+	fmt.Printf("size: %d\n", fileSize)
 	defer reader.Close()
 	//yx 
 
 	// if adder.Progress {
-	// 	rdr := &progressReader{file: reader, path: path, out: adder.Out}
-	// 	if fi, ok := file.(files.FileInfo); ok {
-	// 		reader = &progressReader2{rdr, fi}
-	// 	} else {
-	// 		reader = rdr
-	// 	}
+	//	rdr := &progressReader{file: reader, path: path, out: adder.Out}
+	//	if fi, ok := file.(files.FileInfo); ok {
+	//		reader = &progressReader2{rdr, fi}
+	//	} else {
+	//		reader = rdr
+	//	}
 	// }
 
+	// yx
 	dagnode, err := adder.add(&reader)
+	// yx
+
+	// dagnode, err := adder.add(reader)
 	if err != nil {
 		return err
 	}
