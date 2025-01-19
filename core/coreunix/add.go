@@ -480,13 +480,22 @@ func (adder *Adder) addFile(path string, file files.File) error {
 	//	}
 	// }
 
-	// multiPorcess Cross-read Keystone Add
+	// // multiPorcess Cross-read Keystone Add
+	// fileSize, err := file.Size()
+	// if err != nil {
+	// 	fmt.Printf("Error getting file size: %v\n", err)
+	// 	return err
+	// }
+	// reader := ipfsKeystoneTest.MultiProcess_Cross_Ipfs_keystone_test(1, "aestest.txt", fileSize)
+
+	// multiPorcess Cross-read Flexible Keystone Add
 	fileSize, err := file.Size()
 	if err != nil {
 		fmt.Printf("Error getting file size: %v\n", err)
 		return err
 	}
-	reader := ipfsKeystoneTest.MultiProcess_Cross_Ipfs_keystone_test(1, "aestest.txt", fileSize)
+	var flexible int = 2
+	reader := ipfsKeystoneTest.MultiProcess_Cross_Flexible_Ipfs_keystone_test(1, "aestest.txt", fileSize, flexible)
 
 	defer reader.Close()
 	//yx
