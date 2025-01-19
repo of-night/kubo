@@ -469,16 +469,6 @@ func (adder *Adder) addFile(path string, file files.File) error {
 	// reader := ipfsKeystoneTest.MultiProcess_Ipfs_keystone_test(1, "aestest.txt", fileSizeInt)
 
 	// defer reader.Close()
-	//yx 
-
-	// if adder.Progress {
-	//	rdr := &progressReader{file: reader, path: path, out: adder.Out}
-	//	if fi, ok := file.(files.FileInfo); ok {
-	//		reader = &progressReader2{rdr, fi}
-	//	} else {
-	//		reader = rdr
-	//	}
-	// }
 
 	// // multiPorcess Cross-read Keystone Add
 	// fileSize, err := file.Size()
@@ -487,6 +477,8 @@ func (adder *Adder) addFile(path string, file files.File) error {
 	// 	return err
 	// }
 	// reader := ipfsKeystoneTest.MultiProcess_Cross_Ipfs_keystone_test(1, "aestest.txt", fileSize)
+
+	// defer reader.Close()
 
 	// multiPorcess Cross-read Flexible Keystone Add
 	fileSize, err := file.Size()
@@ -499,6 +491,15 @@ func (adder *Adder) addFile(path string, file files.File) error {
 
 	defer reader.Close()
 	//yx
+
+	// if adder.Progress {
+	//	rdr := &progressReader{file: reader, path: path, out: adder.Out}
+	//	if fi, ok := file.(files.FileInfo); ok {
+	//		reader = &progressReader2{rdr, fi}
+	//	} else {
+	//		reader = rdr
+	//	}
+	// }
 
 	// yx
 	dagnode, err := adder.add(&reader)
