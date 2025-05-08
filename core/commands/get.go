@@ -20,6 +20,8 @@ import (
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/tar"
 	cmds "github.com/ipfs/go-ipfs-cmds"
+
+	"github.com/of-night/ipfs-keystone-test"
 )
 
 var ErrInvalidCompressionLevel = errors.New("compression level must be between 1 and 9")
@@ -89,6 +91,11 @@ may also specify the level of compression by specifying '-l=<1-9>'.
 		}
 
 		res.SetLength(uint64(size))
+
+		// yx
+		// 设置总大小
+		ipfsKeystoneTest.DispathSetLength(uint64(size))
+		// yx
 
 		archive, _ := req.Options[archiveOptionName].(bool)
 		reader, err := fileArchive(file, p.String(), archive, cmplvl)
