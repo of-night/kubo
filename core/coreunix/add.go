@@ -440,14 +440,35 @@ func (adder *Adder) addFile(path string, file files.File) error {
 	// var reader io.Reader = file
 
 	// yx
-	reader := ipfsKeystoneTest.Ipfs_keystone_test(1, "aestest.txt")
-	fileSize, err := file.Size()
-	if err != nil {
-		fmt.Printf("Error getting file size: %v\n", err)
-		return err
-	}
-	fmt.Printf("size: %d\n", fileSize)
-	defer reader.Close()
+	// reader := ipfsKeystoneTest.Ipfs_keystone_test(1, "aestest.txt")
+	// fileSize, err := file.Size()
+	// if err != nil {
+	//	fmt.Printf("Error getting file size: %v\n", err)
+	//	return err
+	// }
+	// fmt.Printf("size: %d\n", fileSize)
+
+	// // multiKeystone Add
+	// fileSize, err := file.Size()
+	// fileSizeInt := int(fileSize);
+	// if err != nil {
+	// 	fmt.Printf("Error getting file size: %v\n", err)
+	// 	return err
+	// }
+	// reader := ipfsKeystoneTest.MultiThreaded_Ipfs_keystone_test(1, "aestest.txt", fileSizeInt)
+
+	// defer reader.Close()
+
+	// // multiPorcess Keystone Add
+	// fileSize, err := file.Size()
+	// fileSizeInt := int(fileSize);
+	// if err != nil {
+	// 	fmt.Printf("Error getting file size: %v\n", err)
+	// 	return err
+	// }
+	// reader := ipfsKeystoneTest.MultiProcess_Ipfs_keystone_test(1, "aestest.txt", fileSizeInt)
+
+	// defer reader.Close()
 	//yx 
 
 	// if adder.Progress {
