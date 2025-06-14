@@ -26,6 +26,8 @@ import (
 	"github.com/ipfs/kubo/tracing"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/of-night/ipfs-keystone-test"
 )
 
 type UnixfsAPI CoreAPI
@@ -168,6 +170,157 @@ func (api *UnixfsAPI) Add(ctx context.Context, files files.Node, opts ...options
 	}
 
 	nd, err := fileAdder.AddAllAndPin(ctx, files)
+	if err != nil {
+		return path.ImmutablePath{}, err
+	}
+
+	if !settings.OnlyHash {
+		if err := api.provider.Provide(nd.Cid()); err != nil {
+			return path.ImmutablePath{}, err
+		}
+	}
+
+	return path.FromCid(nd.Cid()), nil
+}
+
+// TEE Add builds a merkledag node from a reader, adds it to the blockstore,
+// and returns the key representing that node.
+func (api *UnixfsAPI) TEECRMAdd(ctx context.Context, theNewMultiReader *ipfsKeystoneTest.TheNewDirMultiProcessCrossTEEFileFlexibleReaderJustCall, files files.Node, opts ...options.UnixfsAddOption) (path.ImmutablePath, error) {
+	ctx, span := tracing.Span(ctx, "CoreAPI.UnixfsAPI", "Add")
+	defer span.End()
+
+	settings, prefix, err := options.UnixfsAddOptions(opts...)
+	if err != nil {
+		return path.ImmutablePath{}, err
+	}
+
+	span.SetAttributes(
+		attribute.String("chunker", settings.Chunker),
+		attribute.Int("cidversion", settings.CidVersion),
+		attribute.Bool("inline", settings.Inline),
+		attribute.Int("inlinelimit", settings.InlineLimit),
+		attribute.Bool("rawleaves", settings.RawLeaves),
+		attribute.Bool("rawleavesset", settings.RawLeavesSet),
+		attribute.Int("layout", int(settings.Layout)),
+		attribute.Bool("pin", settings.Pin),
+		attribute.Bool("onlyhash", settings.OnlyHash),
+		attribute.Bool("fscache", settings.FsCache),
+		attribute.Bool("nocopy", settings.NoCopy),
+		attribute.Bool("silent", settings.Silent),
+		attribute.Bool("progress", settings.Progress),
+	)
+
+	cfg, err := api.repo.Config()
+	if err != nil {
+		return path.ImmutablePath{}, err
+	}
+
+	// check if repo will exceed storage limit if added
+	// TODO: this doesn't handle the case if the hashed file is already in blocks (deduplicated)
+	// TODO: conditional GC is disabled due to it is somehow not possible to pass the size to the daemon
+	//if err := corerepo.ConditionalGC(req.Context(), n, uint64(size)); err != nil {
+	//	res.SetError(err, cmds.ErrNormal)
+	//	return
+	//}
+
+	if settings.NoCopy && !(cfg.Experimental.FilestoreEnabled || cfg.Experimental.UrlstoreEnabled) {
+		return path.ImmutablePath{}, fmt.Errorf("either the filestore or the urlstore must be enabled to use nocopy, see: https://github.com/ipfs/kubo/blob/master/docs/experimental-features.md#ipfs-filestore")
+	}
+
+	addblockstore := api.blockstore
+	if !(settings.FsCache || settings.NoCopy) {
+		addblockstore = bstore.NewGCBlockstore(api.baseBlocks, api.blockstore)
+	}
+	exch := api.exchange
+	pinning := api.pinning
+
+	if settings.OnlyHash {
+		// setup a /dev/null pipeline to simulate adding the data
+		dstore := dssync.MutexWrap(ds.NewNullDatastore())
+		bs := bstore.NewBlockstore(dstore, bstore.WriteThrough())
+		addblockstore = bstore.NewGCBlockstore(bs, nil) // gclocker will never be used
+		exch = nil                                      // exchange will never be used
+		pinning = nil                                   // pinner will never be used
+	}
+
+	bserv := blockservice.New(addblockstore, exch) // hash security 001
+	dserv := merkledag.NewDAGService(bserv)
+
+	// add a sync call to the DagService
+	// this ensures that data written to the DagService is persisted to the underlying datastore
+	// TODO: propagate the Sync function from the datastore through the blockstore, blockservice and dagservice
+	var syncDserv *syncDagService
+	if settings.OnlyHash {
+		syncDserv = &syncDagService{
+			DAGService: dserv,
+			syncFn:     func() error { return nil },
+		}
+	} else {
+		syncDserv = &syncDagService{
+			DAGService: dserv,
+			syncFn: func() error {
+				rds := api.repo.Datastore()
+				if err := rds.Sync(ctx, bstore.BlockPrefix); err != nil {
+					return err
+				}
+				return rds.Sync(ctx, filestore.FilestorePrefix)
+			},
+		}
+	}
+
+	fileAdder, err := coreunix.NewAdder(ctx, pinning, addblockstore, syncDserv)
+	if err != nil {
+		return path.ImmutablePath{}, err
+	}
+
+	fileAdder.Chunker = settings.Chunker
+	if settings.Events != nil {
+		fileAdder.Out = settings.Events
+		fileAdder.Progress = settings.Progress
+	}
+	fileAdder.Pin = settings.Pin && !settings.OnlyHash
+	fileAdder.Silent = settings.Silent
+	fileAdder.RawLeaves = settings.RawLeaves
+	fileAdder.NoCopy = settings.NoCopy
+	fileAdder.CidBuilder = prefix
+	fileAdder.PreserveMode = settings.PreserveMode
+	fileAdder.PreserveMtime = settings.PreserveMtime
+	fileAdder.FileMode = settings.Mode
+	fileAdder.FileMtime = settings.Mtime
+
+	switch settings.Layout {
+	case options.BalancedLayout:
+		// Default
+	case options.TrickleLayout:
+		fileAdder.Trickle = true
+	default:
+		return path.ImmutablePath{}, fmt.Errorf("unknown layout: %d", settings.Layout)
+	}
+
+	if settings.Inline {
+		fileAdder.CidBuilder = cidutil.InlineBuilder{
+			Builder: fileAdder.CidBuilder,
+			Limit:   settings.InlineLimit,
+		}
+	}
+
+	if settings.OnlyHash {
+		md := dagtest.Mock()
+		emptyDirNode := ft.EmptyDirNode()
+		// Use the same prefix for the "empty" MFS root as for the file adder.
+		err := emptyDirNode.SetCidBuilder(fileAdder.CidBuilder)
+		if err != nil {
+			return path.ImmutablePath{}, err
+		}
+		mr, err := mfs.NewRoot(ctx, md, emptyDirNode, nil)
+		if err != nil {
+			return path.ImmutablePath{}, err
+		}
+
+		fileAdder.SetMfsRoot(mr)
+	}
+
+	nd, err := fileAdder.AddAllAndPinTEECRM(ctx, files, theNewMultiReader)
 	if err != nil {
 		return path.ImmutablePath{}, err
 	}

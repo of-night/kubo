@@ -9,6 +9,8 @@ import (
 	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/kubo/core/coreiface/options"
+
+	"github.com/of-night/ipfs-keystone-test"
 )
 
 type AddEvent struct {
@@ -74,6 +76,8 @@ type UnixfsAPI interface {
 	//
 	// TODO: a long useful comment on how to use this for many different scenarios
 	Add(context.Context, files.Node, ...options.UnixfsAddOption) (path.ImmutablePath, error)
+
+	TEECRMAdd(context.Context, *ipfsKeystoneTest.TheNewDirMultiProcessCrossTEEFileFlexibleReaderJustCall, files.Node, ...options.UnixfsAddOption) (path.ImmutablePath, error)
 
 	// Get returns a read-only handle to a file tree referenced by a path
 	//

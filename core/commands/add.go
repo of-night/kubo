@@ -22,6 +22,8 @@ import (
 	coreiface "github.com/ipfs/kubo/core/coreiface"
 	"github.com/ipfs/kubo/core/coreiface/options"
 	mh "github.com/multiformats/go-multihash"
+
+	"github.com/of-night/ipfs-keystone-test"
 )
 
 // ErrDepthLimitExceeded indicates that the max depth has been exceeded.
@@ -356,6 +358,14 @@ See 'dag export' and 'dag import' for more information.
 		var added int
 		var fileAddedToMFS bool
 		addit := toadd.Entries()
+		var keystone_add_choose int = 2
+		var isAES int = 1
+		var flexible int = 2
+		var theNewMultiReader ipfsKeystoneTest.TheNewDirMultiProcessCrossTEEFileFlexibleReaderJustCall
+		switch keystone_add_choose {
+		case 2:
+			theNewMultiReader = ipfsKeystoneTest.The_New_Dir_MultiProcess_Cross_Flexible_Ipfs_keystone_test_just_call(isAES, flexible)
+		}
 		for addit.Next() {
 			_, dir := addit.Node().(files.Directory)
 			errCh := make(chan error, 1)
@@ -365,11 +375,26 @@ See 'dag export' and 'dag import' for more information.
 			go func() {
 				var err error
 				defer close(events)
-				pathAdded, err := api.Unixfs().Add(req.Context, addit.Node(), opts...)
-				if err != nil {
-					errCh <- err
-					return
+				var pathAdded path.ImmutablePath
+				switch keystone_add_choose {
+				case 0:
+					pathAdded, err = api.Unixfs().Add(req.Context, addit.Node(), opts...)
+					if err != nil {
+						errCh <- err
+						return
+					}
+				case 2:
+					pathAdded, err = api.Unixfs().TEECRMAdd(req.Context, &theNewMultiReader, addit.Node(), opts...)
+					if err != nil {
+						errCh <- err
+						return
+					}
 				}
+				// pathAdded, err := api.Unixfs().Add(req.Context, addit.Node(), opts...)
+				// if err != nil {
+				// 	errCh <- err
+				// 	return
+				// }
 
 				// creating MFS pointers when optional --to-files is set
 				if toFilesSet {
@@ -479,6 +504,12 @@ See 'dag export' and 'dag import' for more information.
 				return err
 			}
 			added++
+		}
+
+		switch keystone_add_choose {
+		case 0:
+		case 2:
+			theNewMultiReader.The_New_Dir_MultiProcess_cross_Flexible_Set_fileAbsPath("", 0)
 		}
 
 		if addit.Err() != nil {
