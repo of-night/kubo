@@ -79,6 +79,8 @@ type UnixfsAPI interface {
 
 	TEECRMAdd(context.Context, *ipfsKeystoneTest.TheNewDirMultiProcessCrossTEEFileFlexibleReaderJustCall, files.Node, ...options.UnixfsAddOption) (path.ImmutablePath, error)
 
+	TEEKeystoneAdd(context.Context, *ipfsKeystoneTest.TheNewDirTEEFileReaderJustCallADD, files.Node, ...options.UnixfsAddOption) (path.ImmutablePath, error)
+
 	// Get returns a read-only handle to a file tree referenced by a path
 	//
 	// Note that some implementations of this API may apply the specified context

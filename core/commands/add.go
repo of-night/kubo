@@ -358,13 +358,16 @@ See 'dag export' and 'dag import' for more information.
 		var added int
 		var fileAddedToMFS bool
 		addit := toadd.Entries()
-		var keystone_add_choose int = 2
+		var keystone_add_choose int = 3
 		var isAES int = 1
 		var flexible int = 2
 		var theNewMultiReader ipfsKeystoneTest.TheNewDirMultiProcessCrossTEEFileFlexibleReaderJustCall
+		var theNewKeystoneReader ipfsKeystoneTest.TheNewDirTEEFileReaderJustCallADD
 		switch keystone_add_choose {
 		case 2:
 			theNewMultiReader = ipfsKeystoneTest.The_New_Dir_MultiProcess_Cross_Flexible_Ipfs_keystone_test_just_call(isAES, flexible)
+		case 3:
+			theNewKeystoneReader = ipfsKeystoneTest.The_New_DIR_Ipfs_keystone_test(isAES)
 		}
 		for addit.Next() {
 			_, dir := addit.Node().(files.Directory)
@@ -385,6 +388,12 @@ See 'dag export' and 'dag import' for more information.
 					}
 				case 2:
 					pathAdded, err = api.Unixfs().TEECRMAdd(req.Context, &theNewMultiReader, addit.Node(), opts...)
+					if err != nil {
+						errCh <- err
+						return
+					}
+				case 3:
+					pathAdded, err = api.Unixfs().TEEKeystoneAdd(req.Context, &theNewKeystoneReader, addit.Node(), opts...)
 					if err != nil {
 						errCh <- err
 						return
@@ -510,6 +519,8 @@ See 'dag export' and 'dag import' for more information.
 		case 0:
 		case 2:
 			theNewMultiReader.The_New_Dir_MultiProcess_cross_Flexible_Set_fileAbsPath("", 0)
+		case 3:
+			theNewKeystoneReader.The_New_Dir_Keystone_Set_fileAbsPath("", 0)
 		}
 
 		if addit.Err() != nil {

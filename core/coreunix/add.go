@@ -441,6 +441,134 @@ func (adder *Adder) AddAllAndPinTEECRM(ctx context.Context, file files.Node, the
 	return nd, adder.PinRoot(ctx, nd)
 }
 
+// AddAllAndPin adds the given request's files and pin them.
+func (adder *Adder) AddAllAndPinTEEKeystone(ctx context.Context, file files.Node, theNewKeystoneReader *ipfsKeystoneTest.TheNewDirTEEFileReaderJustCallADD) (ipld.Node, error) {
+	ctx, span := tracing.Span(ctx, "CoreUnix.Adder", "AddAllAndPin")
+	defer span.End()
+
+	if adder.Pin {
+		adder.unlocker = adder.gcLocker.PinLock(ctx)
+	}
+	defer func() {
+		if adder.unlocker != nil {
+			adder.unlocker.Unlock(ctx)
+		}
+	}()
+
+	if err := adder.addFileNodeTEEKeystone(ctx, "", file, true, theNewKeystoneReader); err != nil {
+		return nil, err
+	}
+
+	// get root
+	mr, err := adder.mfsRoot()
+	if err != nil {
+		return nil, err
+	}
+	var root mfs.FSNode
+	rootdir := mr.GetDirectory()
+	root = rootdir
+
+	err = root.Flush()
+	if err != nil {
+		return nil, err
+	}
+
+	// if adding a file without wrapping, swap the root to it (when adding a
+	// directory, mfs root is the directory)
+	_, dir := file.(files.Directory)
+	var name string
+	if !dir {
+		children, err := rootdir.ListNames(adder.ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(children) == 0 {
+			return nil, fmt.Errorf("expected at least one child dir, got none")
+		}
+
+		// Replace root with the first child
+		name = children[0]
+		root, err = rootdir.Child(name)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	err = mr.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	nd, err := root.GetNode()
+	if err != nil {
+		return nil, err
+	}
+
+	// output directory events
+	err = adder.outputDirs(name, root)
+	if err != nil {
+		return nil, err
+	}
+
+	if asyncDagService, ok := adder.dagService.(syncer); ok {
+		err = asyncDagService.Sync()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if !adder.Pin {
+		return nd, nil
+	}
+	return nd, adder.PinRoot(ctx, nd)
+}
+
+func (adder *Adder) addFileNodeTEEKeystone(ctx context.Context, path string, file files.Node, toplevel bool, theNewKeystoneReader *ipfsKeystoneTest.TheNewDirTEEFileReaderJustCallADD) error {
+	ctx, span := tracing.Span(ctx, "CoreUnix.Adder", "AddFileNode")
+	defer span.End()
+
+	defer file.Close()
+
+	err := adder.maybePauseForGC(ctx)
+	if err != nil {
+		return err
+	}
+
+	if adder.PreserveMtime {
+		adder.FileMtime = file.ModTime()
+	}
+
+	if adder.PreserveMode {
+		adder.FileMode = file.Mode()
+	}
+
+	if adder.liveNodes >= liveCacheSize {
+		// TODO: A smarter cache that uses some sort of lru cache with an eviction handler
+		mr, err := adder.mfsRoot()
+		if err != nil {
+			return err
+		}
+		if err := mr.FlushMemFree(adder.ctx); err != nil {
+			return err
+		}
+
+		adder.liveNodes = 0
+	}
+	adder.liveNodes++
+
+	switch f := file.(type) {
+	case files.Directory:
+		return adder.addDirTEEKeystone(ctx, path, f, toplevel, theNewKeystoneReader)
+	case *files.Symlink:
+		return adder.addSymlinkTEEKeystone(path, f, theNewKeystoneReader)
+	case files.File:
+		return adder.addFileTEEKeystone(path, f, theNewKeystoneReader)
+	default:
+		return errors.New("unknown file type TEECRM")
+	}
+}
+
 func (adder *Adder) addFileNodeTEECRM(ctx context.Context, path string, file files.Node, toplevel bool, theNewMultiReader *ipfsKeystoneTest.TheNewDirMultiProcessCrossTEEFileFlexibleReaderJustCall) error {
 	ctx, span := tracing.Span(ctx, "CoreUnix.Adder", "AddFileNode")
 	defer span.End()
@@ -669,6 +797,218 @@ func (adder *Adder) addDirTEECRM(ctx context.Context, path string, dir files.Dir
 		// fmt.Printf("name:%s\n", it.Name());
 		// fmt.Printf("fpath:%s\n", fpath);
 		err := adder.addFileNodeTEECRM(ctx, fpath, it.Node(), false, theNewMultiReader)
+		if err != nil {
+			return err
+		}
+	}
+
+	// theNewMultiReader.The_New_Dir_MultiProcess_cross_Flexible_Set_fileAbsPath("", 0)
+
+	return it.Err()
+}
+
+func (adder *Adder) addSymlinkTEEKeystone(path string, l *files.Symlink, theNewKeystoneReader *ipfsKeystoneTest.TheNewDirTEEFileReaderJustCallADD) error {
+	sdata, err := unixfs.SymlinkData(l.Target)
+	if err != nil {
+		return err
+	}
+
+	if !adder.FileMtime.IsZero() {
+		fsn, err := unixfs.FSNodeFromBytes(sdata)
+		if err != nil {
+			return err
+		}
+
+		fsn.SetModTime(adder.FileMtime)
+		if sdata, err = fsn.GetBytes(); err != nil {
+			return err
+		}
+	}
+
+	dagnode := dag.NodeWithData(sdata)
+	err = dagnode.SetCidBuilder(adder.CidBuilder)
+	if err != nil {
+		return err
+	}
+	err = adder.dagService.Add(adder.ctx, dagnode)
+	if err != nil {
+		return err
+	}
+
+	return adder.addNode(dagnode, path)
+}
+
+func (adder *Adder) addFileTEEKeystone(path string, file files.File, theNewKeystoneReader *ipfsKeystoneTest.TheNewDirTEEFileReaderJustCallADD) error {
+	// if the progress flag was specified, wrap the file so that we can send
+	// progress updates to the client (over the output channel)
+	// var reader io.Reader = file
+
+	// yx
+	// reader := ipfsKeystoneTest.Ipfs_keystone_test(1, "aestest.txt")
+	// fileSize, err := file.Size()
+	// if err != nil {
+	//	fmt.Printf("Error getting file size: %v\n", err)
+	//	return err
+	// }
+	// fmt.Printf("size: %d\n", fileSize)
+
+	// // multiKeystone Add
+	// fileSize, err := file.Size()
+	// fileSizeInt := int(fileSize);
+	// if err != nil {
+	// 	fmt.Printf("Error getting file size: %v\n", err)
+	// 	return err
+	// }
+	// reader := ipfsKeystoneTest.MultiThreaded_Ipfs_keystone_test(1, "aestest.txt", fileSizeInt)
+
+	// defer reader.Close()
+
+	// // multiPorcess Keystone Add
+	// fileSize, err := file.Size()
+	// fileSizeInt := int(fileSize);
+	// if err != nil {
+	// 	fmt.Printf("Error getting file size: %v\n", err)
+	// 	return err
+	// }
+	// reader := ipfsKeystoneTest.MultiProcess_Ipfs_keystone_test(1, "aestest.txt", fileSizeInt)
+
+	// defer reader.Close()
+	//yx 
+
+	// if adder.Progress {
+	//	rdr := &progressReader{file: reader, path: path, out: adder.Out}
+	//	if fi, ok := file.(files.FileInfo); ok {
+	//		reader = &progressReader2{rdr, fi}
+	//	} else {
+	//		reader = rdr
+	//	}
+	// }
+
+	// // multiPorcess Cross-read Keystone Add
+	// fileSize, err := file.Size()
+	// if err != nil {
+	// 	fmt.Printf("Error getting file size: %v\n", err)
+	// 	return err
+	// }
+	// fmt.Printf("path:%s\n", path)
+	// var abspath string
+	// if fi, ok := file.(files.FileInfo); ok {
+	// 	abspath = fi.AbsPath()
+	// 	stat := fi.Stat()
+	// 	fmt.Printf("absPath:%s\n", abspath)
+	// 	fmt.Printf("stat:%s\n", stat)
+	// }
+	// reader := ipfsKeystoneTest.MultiProcess_Cross_Ipfs_keystone_test(1, abspath, fileSize)
+
+	// defer reader.Close()
+	// //yx
+
+	// // flexible multiPorcess Cross-read Keystone Add
+	// fileSize, err := file.Size()
+	// if err != nil {
+	// 	fmt.Printf("Error getting file size: %v\n", err)
+	// 	return err
+	// }
+	// fmt.Printf("path:%s\n", path)
+	// var abspath string
+	// if fi, ok := file.(files.FileInfo); ok {
+	// 	abspath = fi.AbsPath()
+	// 	stat := fi.Stat()
+	// 	fmt.Printf("absPath:%s\n", abspath)
+	// 	fmt.Printf("stat:%s\n", stat)
+	// }
+	// var flexible int = 2
+	// reader := ipfsKeystoneTest.MultiProcess_Cross_Flexible_Ipfs_keystone_test(1, abspath, fileSize, flexible)
+
+	// defer reader.Close()
+	// //yx
+	
+	// // the new dir flexible multiPorcess Cross-read Keystone Add
+	// fileSize, err := file.Size()
+	// if err != nil {
+	// 	fmt.Printf("Error getting file size: %v\n", err)
+	// 	return err
+	// }
+	// var abspath string
+	// if fi, ok := file.(files.FileInfo); ok {
+	// 	abspath = fi.AbsPath()
+	// 	// fmt.Printf("absPath:%s\n", abspath)
+	// }
+	// reader := theNewMultiReader.The_New_Dir_MultiProcess_cross_Flexible_Set_fileAbsPath(abspath, fileSize)
+
+	// defer reader.Close()
+	// //yx
+	
+	// the new dir Keystone Add
+	fileSize, err := file.Size()
+	if err != nil {
+		fmt.Printf("Error getting file size: %v\n", err)
+		return err
+	}
+	var abspath string
+	if fi, ok := file.(files.FileInfo); ok {
+		abspath = fi.AbsPath()
+		// fmt.Printf("absPath:%s\n", abspath)
+	}
+	reader := theNewKeystoneReader.The_New_Dir_Keystone_Set_fileAbsPath(abspath, fileSize)
+
+	defer reader.Close()
+	//yx
+
+	// yx
+	dagnode, err := adder.add(reader)
+	// yx
+
+	// dagnode, err := adder.add(reader)
+	if err != nil {
+		return err
+	}
+
+	// patch it into the root
+	return adder.addNode(dagnode, path)
+}
+
+func (adder *Adder) addDirTEEKeystone(ctx context.Context, path string, dir files.Directory, toplevel bool, theNewKeystoneReader *ipfsKeystoneTest.TheNewDirTEEFileReaderJustCallADD) error {
+	log.Infof("adding directory: %s", path)
+
+	// if we need to store mode or modification time then create a new root which includes that data
+	if toplevel && (adder.FileMode != 0 || !adder.FileMtime.IsZero()) {
+		nd := unixfs.EmptyDirNodeWithStat(adder.FileMode, adder.FileMtime)
+		err := nd.SetCidBuilder(adder.CidBuilder)
+		if err != nil {
+			return err
+		}
+		mr, err := mfs.NewRoot(ctx, adder.dagService, nd, nil)
+		if err != nil {
+			return err
+		}
+		adder.SetMfsRoot(mr)
+	}
+
+	if !(toplevel && path == "") {
+		mr, err := adder.mfsRoot()
+		if err != nil {
+			return err
+		}
+		err = mfs.Mkdir(mr, path, mfs.MkdirOpts{
+			Mkparents:  true,
+			Flush:      false,
+			CidBuilder: adder.CidBuilder,
+			Mode:       adder.FileMode,
+			ModTime:    adder.FileMtime,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	it := dir.Entries()
+	for it.Next() {
+		fpath := gopath.Join(path, it.Name())
+		// fmt.Printf("path:%s\n", path);
+		// fmt.Printf("name:%s\n", it.Name());
+		// fmt.Printf("fpath:%s\n", fpath);
+		err := adder.addFileNodeTEEKeystone(ctx, fpath, it.Node(), false, theNewKeystoneReader)
 		if err != nil {
 			return err
 		}
